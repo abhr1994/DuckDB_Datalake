@@ -1,0 +1,6 @@
+pandas
+duckdb
+sqlescapy
+lxml
+html5lib
+prefect
