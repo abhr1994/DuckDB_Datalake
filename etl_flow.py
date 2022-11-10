@@ -8,6 +8,7 @@ set s3_endpoint='localhost:4566';
 set s3_use_ssl='false';
 set s3_url_style='path';
 """)
+dpio_obj = DuckPondIOManager(bucket_name="datalake", duckdb=duckdb_obj, prefix="test_env")
 
 
 @task(retries=3)
@@ -18,7 +19,6 @@ def stg_customers() -> SQL:
     df.rename(columns={"id": "customer_id"}, inplace=True)
     return_sql = SQL("select * from $df", df=df)
     print(duckdb_obj.query(return_sql))
-    dpio_obj = DuckPondIOManager(bucket_name="datalake", duckdb=duckdb_obj, prefix="test_env")
     dpio_obj.handle_output(table_name="stg_customers", select_statement=return_sql)
     return return_sql
 
@@ -31,7 +31,6 @@ def stg_orders() -> SQL:
     df.rename(columns={"id": "order_id", "user_id": "customer_id"}, inplace=True)
     return_sql = SQL("select * from $df", df=df)
     print(duckdb_obj.query(return_sql))
-    dpio_obj = DuckPondIOManager(bucket_name="datalake", duckdb=duckdb_obj, prefix="test_env")
     dpio_obj.handle_output(table_name="stg_orders", select_statement=return_sql)
     return return_sql
 
@@ -45,7 +44,6 @@ def stg_payments() -> SQL:
     df["amount"] = df["amount"].map(lambda amount: amount / 100)
     return_sql = SQL("select * from $df", df=df)
     print(duckdb_obj.query(return_sql))
-    dpio_obj = DuckPondIOManager(bucket_name="datalake", duckdb=duckdb_obj, prefix="test_env")
     dpio_obj.handle_output(table_name="stg_payments", select_statement=return_sql)
     return return_sql
 
@@ -103,7 +101,6 @@ select * from final
         stg_payments=stg_payments,
     )
     print(duckdb_obj.query(return_sql))
-    dpio_obj = DuckPondIOManager(bucket_name="datalake", duckdb=duckdb_obj, prefix="test_env")
     dpio_obj.handle_output(table_name="customers", select_statement=return_sql)
     return return_sql
 
@@ -145,7 +142,6 @@ select * from final
         stg_payments=stg_payments,
     )
     print(duckdb_obj.query(return_sql))
-    dpio_obj = DuckPondIOManager(bucket_name="datalake", duckdb=duckdb_obj, prefix="test_env")
     dpio_obj.handle_output(table_name="orders", select_statement=return_sql)
     return return_sql
 
