@@ -4,3 +4,5 @@ sqlescapy
 lxml
 html5lib
 prefect
+localstack
+awscli-local

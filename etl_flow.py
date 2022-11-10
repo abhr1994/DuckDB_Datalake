@@ -1,71 +1,58 @@
-from duckpond import SQL
+from duckpond import SQL, DuckDB, DuckPondIOManager
 import pandas as pd
+from prefect import flow, task
+
+duckdb_obj = DuckDB(options="""set s3_access_key_id='test';
+set s3_secret_access_key='test';
+set s3_endpoint='localhost:4566';
+set s3_use_ssl='false';
+set s3_url_style='path';
+""")
 
 
-@asset
-def population() -> SQL:
-    df = pd.read_html(
-        "https://en.wikipedia.org/wiki/List_of_countries_by_population_(United_Nations)",
-    )[0]
-    df.columns = [
-        "country",
-        "continent",
-        "subregion",
-        "population_2018",
-        "population_2019",
-        "pop_change",
-    ]
-    df["pop_change"] = [
-        float(str(row).rstrip("%").replace("\u2212", "-")) for row in df["pop_change"]
-    ]
-    return SQL("select * from $df", df=df)
-
-
-@asset
-def continent_population(population: SQL) -> SQL:
-    return SQL(
-        "select continent, avg(pop_change) as avg_pop_change from $population group by 1 order by 2 desc",
-        population=population,
-    )
-
-
-@asset(required_resource_keys={"duckdb"})
-def print_continent_population(context, continent_population: SQL):
-    context.log.info(f"Final asset:")
-    context.log.info(context.resources.duckdb.query(continent_population))
-
-
-@asset
+@task(retries=3)
 def stg_customers() -> SQL:
     df = pd.read_csv(
-        "https://raw.githubusercontent.com/dbt-labs/jaffle_shop/main/seeds/raw_customers.csv"
+        "https://raw.githubusercontent.com/abhr1994/DuckDB_Datalake/main/data/raw_customers.csv"
     )
     df.rename(columns={"id": "customer_id"}, inplace=True)
-    return SQL("select * from $df", df=df)
+    return_sql = SQL("select * from $df", df=df)
+    print(duckdb_obj.query(return_sql))
+    dpio_obj = DuckPondIOManager(bucket_name="datalake", duckdb=duckdb_obj, prefix="test_env")
+    dpio_obj.handle_output(table_name="stg_customers", select_statement=return_sql)
+    return return_sql
 
 
-@asset
+@task(retries=3)
 def stg_orders() -> SQL:
     df = pd.read_csv(
-        "https://raw.githubusercontent.com/dbt-labs/jaffle_shop/main/seeds/raw_orders.csv"
+        "https://raw.githubusercontent.com/abhr1994/DuckDB_Datalake/main/data/raw_orders.csv"
     )
     df.rename(columns={"id": "order_id", "user_id": "customer_id"}, inplace=True)
-    return SQL("select * from $df", df=df)
+    return_sql = SQL("select * from $df", df=df)
+    print(duckdb_obj.query(return_sql))
+    dpio_obj = DuckPondIOManager(bucket_name="datalake", duckdb=duckdb_obj, prefix="test_env")
+    dpio_obj.handle_output(table_name="stg_orders", select_statement=return_sql)
+    return return_sql
 
 
-@asset
+@task(retries=3)
 def stg_payments() -> SQL:
     df = pd.read_csv(
-        "https://raw.githubusercontent.com/dbt-labs/jaffle_shop/main/seeds/raw_payments.csv"
+        "https://raw.githubusercontent.com/abhr1994/DuckDB_Datalake/main/data/raw_payments.csv"
     )
     df.rename(columns={"id": "payment_id"}, inplace=True)
     df["amount"] = df["amount"].map(lambda amount: amount / 100)
-    return SQL("select * from $df", df=df)
+    return_sql = SQL("select * from $df", df=df)
+    print(duckdb_obj.query(return_sql))
+    dpio_obj = DuckPondIOManager(bucket_name="datalake", duckdb=duckdb_obj, prefix="test_env")
+    dpio_obj.handle_output(table_name="stg_payments", select_statement=return_sql)
+    return return_sql
 
 
-@asset
+@task(retries=3)
 def customers(stg_customers: SQL, stg_orders: SQL, stg_payments: SQL) -> SQL:
-    return SQL(
+    return_sql = SQL(
         """
 with customers as (
     select * from $stg_customers
@@ -115,12 +102,16 @@ select * from final
         stg_orders=stg_orders,
         stg_payments=stg_payments,
     )
+    print(duckdb_obj.query(return_sql))
+    dpio_obj = DuckPondIOManager(bucket_name="datalake", duckdb=duckdb_obj, prefix="test_env")
+    dpio_obj.handle_output(table_name="customers", select_statement=return_sql)
+    return return_sql
 
 
-@asset
+@task(retries=3)
 def orders(stg_orders: SQL, stg_payments: SQL) -> SQL:
     payment_methods = ["credit_card", "coupon", "bank_transfer", "gift_card"]
-    return SQL(
+    return_sql = SQL(
         f"""
 with orders as (
     select * from $stg_orders
@@ -153,11 +144,19 @@ select * from final
         stg_orders=stg_orders,
         stg_payments=stg_payments,
     )
+    print(duckdb_obj.query(return_sql))
+    dpio_obj = DuckPondIOManager(bucket_name="datalake", duckdb=duckdb_obj, prefix="test_env")
+    dpio_obj.handle_output(table_name="orders", select_statement=return_sql)
+    return return_sql
 
 
-@asset(required_resource_keys={"duckdb"})
-def preview_all(context, customers: SQL, orders: SQL):
-    context.log.info(f"Customers:")
-    context.log.info(context.resources.duckdb.query(customers))
-    context.log.info(f"Orders:")
-    context.log.info(context.resources.duckdb.query(orders))
+@flow(name="ETL DuckDB")
+def ETL_FLOW():
+    p = stg_customers.submit()
+    q = stg_orders.submit()
+    r = stg_payments.submit()
+    customers.submit(p, q, r)
+    orders.submit(q, r)
+
+
+ETL_FLOW()
